@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
-RSpec.describe "Bundler.with_env helpers" do
+RSpec.describe "env helpers" do
   def bundle_exec_ruby(args, options = {})
-    build_bundler_context options
+    build_bundler_context options.dup
     bundle "exec '#{Gem.ruby}' #{args}", options
   end
 
   def build_bundler_context(options = {})
-    bundle "config set path vendor/bundle"
-    gemfile "source \"#{file_uri_for(gem_repo1)}\""
+    bundle "config set path vendor/bundle", options.dup
+    gemfile "source 'https://gem.repo1'"
     bundle "install", options
   end
 
@@ -65,11 +65,11 @@ RSpec.describe "Bundler.with_env helpers" do
       # Simulate bundler has not yet been loaded
       ENV.replace(ENV.to_hash.delete_if {|k, _v| k.start_with?(Bundler::EnvironmentPreserver::BUNDLER_PREFIX) })
 
-      original = ruby('puts ENV.to_a.map {|e| e.join("=") }.sort.join("\n")')
+      original = ruby('puts ENV.to_a.map {|e| e.join("=") }.sort.join("\n")', artifice: "fail")
       create_file("source.rb", <<-RUBY)
         puts Bundler.original_env.to_a.map {|e| e.join("=") }.sort.join("\n")
       RUBY
-      bundle_exec_ruby bundled_app("source.rb")
+      bundle_exec_ruby bundled_app("source.rb"), artifice: "fail"
       expect(out).to eq original
     end
   end
@@ -101,6 +101,15 @@ RSpec.describe "Bundler.with_env helpers" do
       ENV["BUNDLER_ORIG_RUBYOPT"] = "-W2 -rbundler/setup #{ENV["RUBYOPT"]}"
       bundle_exec_ruby bundled_app("source.rb")
       expect(last_command.stdboth).not_to include("-rbundler/setup")
+    end
+
+    it "should delete BUNDLER_SETUP even if it was present in original env" do
+      create_file("source.rb", <<-RUBY)
+        print #{modified_env}.has_key?('BUNDLER_SETUP')
+      RUBY
+      ENV["BUNDLER_ORIG_BUNDLER_SETUP"] = system_gem_path("gems/bundler-#{Bundler::VERSION}/lib/bundler/setup").to_s
+      bundle_exec_ruby bundled_app("source.rb")
+      expect(last_command.stdboth).to include "false"
     end
 
     it "should restore RUBYLIB", :ruby_repo do
